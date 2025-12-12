@@ -2,15 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Type } from '@google/genai';
 import { AnalysisResult, ChatMessage } from './types';
 
-// Initialize Gemini API
-const API_KEY = process.env.API_KEY || (import.meta as any).env?.VITE_API_KEY;
-
-if (!API_KEY) {
-  console.warn("Missing API_KEY. Please set VITE_API_KEY in your .env file.");
-}
-
-const ai = new GoogleGenAI({ apiKey: API_KEY || '' });
-
 const App: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
@@ -20,14 +11,45 @@ const App: React.FC = () => {
   const [chatInput, setChatInput] = useState('');
   const [activeTab, setActiveTab] = useState<'analysis' | 'chat'>('analysis');
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.7);
-  const [useFastModel, setUseFastModel] = useState(false); // Default to Pro (False)
+  // Default to Fast Model (Flash) to avoid 429 Quota errors on initial load
+  const [useFastModel, setUseFastModel] = useState(true); 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // API Key Management
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [customApiKey, setCustomApiKey] = useState(localStorage.getItem('gemini_api_key') || '');
+  const [tempKey, setTempKey] = useState('');
 
   // Scroll to bottom of chat
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatHistory, activeTab]);
+
+  // Helper to get the correct AI client instance
+  const getAiClient = () => {
+    const envKey = process.env.API_KEY || (import.meta as any).env?.VITE_API_KEY;
+    const effectiveKey = customApiKey || envKey;
+    
+    if (!effectiveKey) {
+      throw new Error("Missing API Key. Please click the 'Key' button to add one.");
+    }
+    return new GoogleGenAI({ apiKey: effectiveKey });
+  };
+
+  const handleSaveKey = () => {
+    setCustomApiKey(tempKey);
+    localStorage.setItem('gemini_api_key', tempKey);
+    setShowKeyModal(false);
+    setError(null);
+  };
+
+  const handleClearKey = () => {
+    setCustomApiKey('');
+    setTempKey('');
+    localStorage.removeItem('gemini_api_key');
+    setShowKeyModal(false);
+  };
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFile = event.target.files?.[0];
@@ -60,11 +82,6 @@ const App: React.FC = () => {
 
   const handleAnalyze = async () => {
     if (!file) return;
-    if (!API_KEY) {
-      setError("API Key is missing. Please check your configuration.");
-      return;
-    }
-
     setAnalyzing(true);
     setError(null);
 
@@ -72,6 +89,7 @@ const App: React.FC = () => {
     const modelName = useFastModel ? 'gemini-2.5-flash' : 'gemini-3-pro-preview';
 
     try {
+      const ai = getAiClient();
       const mediaPart = await fileToGenerativePart(file);
 
       const prompt = `
@@ -156,27 +174,28 @@ const App: React.FC = () => {
           setResult(parsedResult);
         } catch (parseErr) {
           console.error("JSON Parse Error:", parseErr);
-          throw new Error("Analysis result was incomplete or malformed. Please try a shorter video.");
+          throw new Error("Analysis result was incomplete. Please try again.");
         }
       } else {
         throw new Error("No response generated.");
       }
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Failed to analyze media.");
+      if (err.message?.includes('429') || err.message?.includes('quota')) {
+        setError("Quota Exceeded (429). Please switch to 'Fast Mode' or provide your own API Key via the key icon above.");
+      } else {
+        setError(err.message || "Failed to analyze media.");
+      }
     } finally {
       setAnalyzing(false);
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!chatInput.trim() || !file) return;
-    if (!API_KEY) {
-       setError("API Key is missing.");
-       return;
-    }
+  const handleSendMessage = async (textOverride?: string) => {
+    const textToSend = textOverride || chatInput;
+    if (!textToSend.trim() || !file) return;
 
-    const userMsg: ChatMessage = { role: 'user', text: chatInput, timestamp: new Date() };
+    const userMsg: ChatMessage = { role: 'user', text: textToSend, timestamp: new Date() };
     setChatHistory((prev) => [...prev, userMsg]);
     setChatInput('');
 
@@ -184,6 +203,7 @@ const App: React.FC = () => {
     const modelName = useFastModel ? 'gemini-2.5-flash' : 'gemini-3-pro-preview';
 
     try {
+      const ai = getAiClient();
       const mediaPart = await fileToGenerativePart(file);
       
       const historyContext = chatHistory.map(m => `${m.role}: ${m.text}`).join('\n');
@@ -214,7 +234,11 @@ const App: React.FC = () => {
       setChatHistory((prev) => [...prev, modelMsg]);
     } catch (err: any) {
       console.error(err);
-      const errorMsg: ChatMessage = { role: 'model', text: "Error: Could not process request.", timestamp: new Date() };
+      const errorText = (err.message?.includes('429') || err.message?.includes('quota')) 
+        ? "Error: Quota exceeded. Please set your own API key." 
+        : "Error: Could not process request.";
+      
+      const errorMsg: ChatMessage = { role: 'model', text: errorText, timestamp: new Date() };
       setChatHistory((prev) => [...prev, errorMsg]);
     }
   };
@@ -226,8 +250,41 @@ const App: React.FC = () => {
     ...filteredSigns.map(s => ({ ...s, type: 'sign' }))
   ].sort((a, b) => (a.timestamp > b.timestamp ? 1 : -1));
 
+  const suggestedQuestions = [
+    "What is the overall mood?",
+    "Describe the speaker's surroundings.",
+    "Are there any subtle gestures I missed?",
+    "Summarize the key points."
+  ];
+
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-200 flex flex-col font-sans">
+    <div className="min-h-screen bg-slate-900 text-slate-200 flex flex-col font-sans relative">
+      
+      {/* API Key Modal */}
+      {showKeyModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 p-6 rounded-2xl max-w-md w-full border border-slate-700 shadow-2xl">
+            <h3 className="text-xl font-bold text-white mb-4">API Settings</h3>
+            <p className="text-slate-400 text-sm mb-4">
+              Enter your Google Gemini API Key to bypass the shared quota limits. 
+              Get one at <a href="https://aistudio.google.com/app/apikey" target="_blank" className="text-indigo-400 underline">aistudio.google.com</a>.
+            </p>
+            <input 
+              type="password" 
+              placeholder="Paste AIza..." 
+              value={tempKey}
+              onChange={(e) => setTempKey(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white mb-4 focus:outline-none focus:border-indigo-500"
+            />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowKeyModal(false)} className="px-4 py-2 text-slate-400 hover:text-white">Cancel</button>
+              {customApiKey && <button onClick={handleClearKey} className="px-4 py-2 text-red-400 hover:text-red-300">Clear Key</button>}
+              <button onClick={handleSaveKey} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500">Save Key</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="bg-slate-800 border-b border-slate-700 p-4 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
@@ -242,11 +299,24 @@ const App: React.FC = () => {
               SignContext
             </h1>
           </div>
-          <div className="text-xs text-slate-400 flex items-center gap-2">
-            <span className={`px-2 py-1 rounded transition-colors ${useFastModel ? 'bg-emerald-900 text-emerald-300' : 'bg-indigo-900 text-indigo-300'}`}>
-              {useFastModel ? 'Gemini 2.5 Flash' : 'Gemini 3 Pro'}
-            </span>
-            <span className="hidden sm:inline">Accessibility Assistant</span>
+          <div className="flex items-center gap-3">
+            <div className="hidden sm:flex text-xs text-slate-400 items-center gap-2">
+              <span className={`px-2 py-1 rounded transition-colors ${useFastModel ? 'bg-emerald-900 text-emerald-300' : 'bg-indigo-900 text-indigo-300'}`}>
+                {useFastModel ? 'Gemini 2.5 Flash' : 'Gemini 3 Pro'}
+              </span>
+            </div>
+            <button 
+              onClick={() => {
+                setTempKey(customApiKey);
+                setShowKeyModal(true);
+              }}
+              className={`p-2 rounded-full transition-colors ${customApiKey ? 'text-emerald-400 bg-emerald-400/10' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
+              title="API Key Settings"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clipRule="evenodd" />
+              </svg>
+            </button>
           </div>
         </div>
       </header>
@@ -386,8 +456,19 @@ const App: React.FC = () => {
           )}
 
           {error && (
-             <div className="bg-red-900/30 border border-red-800 p-4 rounded-lg text-red-200 text-sm">
-               {error}
+             <div className="bg-red-900/30 border border-red-800 p-4 rounded-lg text-red-200 text-sm flex items-center gap-3">
+               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+               </svg>
+               <span className="flex-1">{error}</span>
+               {error.includes('Quota') && (
+                 <button 
+                   onClick={() => setShowKeyModal(true)}
+                   className="whitespace-nowrap bg-red-800 hover:bg-red-700 text-white text-xs px-3 py-1 rounded"
+                 >
+                   Set Key
+                 </button>
+               )}
              </div>
           )}
         </div>
@@ -489,7 +570,20 @@ const App: React.FC = () => {
               <div className="h-full flex flex-col">
                  <div className="flex-1 space-y-4 mb-4">
                    {chatHistory.length === 0 && (
-                     <p className="text-center text-slate-500 text-sm mt-10">Ask questions about the video content, signs, or context.</p>
+                     <div className="flex flex-col items-center justify-center h-full gap-4 p-4">
+                       <p className="text-center text-slate-500 text-sm">Ask Gemini for details missed in the analysis.</p>
+                       <div className="flex flex-wrap gap-2 justify-center">
+                         {suggestedQuestions.map((q, idx) => (
+                           <button 
+                             key={idx}
+                             onClick={() => handleSendMessage(q)}
+                             className="text-xs bg-slate-700 hover:bg-slate-600 text-indigo-300 border border-slate-600 px-3 py-1.5 rounded-full transition-colors"
+                           >
+                             {q}
+                           </button>
+                         ))}
+                       </div>
+                     </div>
                    )}
                    {chatHistory.map((msg, idx) => (
                      <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -521,7 +615,7 @@ const App: React.FC = () => {
                   className="flex-1 bg-slate-900 border border-slate-600 rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
                 />
                 <button 
-                  onClick={handleSendMessage}
+                  onClick={() => handleSendMessage()}
                   disabled={!chatInput.trim() || !file}
                   className="bg-indigo-600 text-white rounded-full p-2 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
