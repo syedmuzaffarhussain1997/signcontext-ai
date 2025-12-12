@@ -3,8 +3,6 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { AnalysisResult, ChatMessage } from './types';
 
 // Initialize Gemini API
-// We check for both standard process.env (Node/Webpack) and import.meta.env (Vite/StackBlitz)
-// to ensure the project works regardless of where it is deployed for the Hackathon.
 const API_KEY = process.env.API_KEY || (import.meta as any).env?.VITE_API_KEY;
 
 if (!API_KEY) {
@@ -22,6 +20,7 @@ const App: React.FC = () => {
   const [chatInput, setChatInput] = useState('');
   const [activeTab, setActiveTab] = useState<'analysis' | 'chat'>('analysis');
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.7);
+  const [useFastModel, setUseFastModel] = useState(false); // Default to Pro (False)
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,7 +45,6 @@ const App: React.FC = () => {
       const reader = new FileReader();
       reader.onloadend = () => {
         const base64String = reader.result as string;
-        // Remove the data URL prefix (e.g., "data:video/mp4;base64,")
         const base64Data = base64String.split(',')[1];
         resolve({
           inlineData: {
@@ -69,6 +67,9 @@ const App: React.FC = () => {
 
     setAnalyzing(true);
     setError(null);
+
+    // Select model based on toggle
+    const modelName = useFastModel ? 'gemini-2.5-flash' : 'gemini-3-pro-preview';
 
     try {
       const mediaPart = await fileToGenerativePart(file);
@@ -95,7 +96,7 @@ const App: React.FC = () => {
       `;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: modelName,
         contents: {
           role: 'user',
           parts: [mediaPart, { text: prompt }]
@@ -146,7 +147,6 @@ const App: React.FC = () => {
       const text = response.text;
       if (text) {
         let cleanText = text.trim();
-        // Remove markdown formatting if present (often wrapped in ```json ... ```)
         if (cleanText.startsWith('```')) {
           cleanText = cleanText.replace(/^```(json)?\n?/, '').replace(/\n?```$/, '');
         }
@@ -180,6 +180,9 @@ const App: React.FC = () => {
     setChatHistory((prev) => [...prev, userMsg]);
     setChatInput('');
 
+    // Use the same model for chat as selected for analysis
+    const modelName = useFastModel ? 'gemini-2.5-flash' : 'gemini-3-pro-preview';
+
     try {
       const mediaPart = await fileToGenerativePart(file);
       
@@ -196,7 +199,7 @@ const App: React.FC = () => {
       `;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: modelName,
         contents: {
           parts: [mediaPart, { text: prompt }]
         }
@@ -216,11 +219,10 @@ const App: React.FC = () => {
     }
   };
 
-  const filteredSigns = result?.signs.filter(s => s.confidence >= confidenceThreshold) || [];
+  const filteredSigns = (result?.signs || []).filter(s => s.confidence >= confidenceThreshold);
   
-  // Merge transcripts and signs for a timeline view
   const timelineItems = [
-    ...(result?.transcript.map(t => ({ ...t, type: 'transcript' })) || []),
+    ...((result?.transcript || []).map(t => ({ ...t, type: 'transcript' }))),
     ...filteredSigns.map(s => ({ ...s, type: 'sign' }))
   ].sort((a, b) => (a.timestamp > b.timestamp ? 1 : -1));
 
@@ -241,7 +243,9 @@ const App: React.FC = () => {
             </h1>
           </div>
           <div className="text-xs text-slate-400 flex items-center gap-2">
-            <span className="bg-slate-700 px-2 py-1 rounded">Gemini 3 Pro</span>
+            <span className={`px-2 py-1 rounded transition-colors ${useFastModel ? 'bg-emerald-900 text-emerald-300' : 'bg-indigo-900 text-indigo-300'}`}>
+              {useFastModel ? 'Gemini 2.5 Flash' : 'Gemini 3 Pro'}
+            </span>
             <span className="hidden sm:inline">Accessibility Assistant</span>
           </div>
         </div>
@@ -286,18 +290,51 @@ const App: React.FC = () => {
                   </div>
                 )}
                 
-                <div className="flex justify-between w-full items-center">
+                <div className="flex justify-between w-full items-center flex-wrap gap-2">
                   <span className="text-sm text-slate-400 truncate max-w-[200px]">{file.name}</span>
-                  <div className="flex gap-2">
-                    <label htmlFor="file-upload" className="text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer px-3 py-1 border border-indigo-500/30 rounded">
-                      Change File
-                    </label>
+                  <div className="flex items-center gap-3">
+                    {/* Model Switcher */}
+                    <button 
+                      onClick={() => setUseFastModel(!useFastModel)}
+                      className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                        useFastModel 
+                          ? 'bg-emerald-900/40 border-emerald-500/50 text-emerald-200 hover:bg-emerald-900/60' 
+                          : 'bg-indigo-900/40 border-indigo-500/50 text-indigo-200 hover:bg-indigo-900/60'
+                      }`}
+                      title={useFastModel ? "Switch to High Precision" : "Switch to Fast Mode"}
+                    >
+                      {useFastModel ? (
+                        <>
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
+                          </svg>
+                          Fast Mode
+                        </>
+                      ) : (
+                        <>
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                            <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
+                          </svg>
+                          Deep Logic
+                        </>
+                      )}
+                    </button>
+                    
                     <button 
                       onClick={handleAnalyze}
                       disabled={analyzing}
-                      className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-full text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-500/20"
                     >
-                      {analyzing ? 'Reasoning...' : 'Analyze Context'}
+                      {analyzing ? (
+                        <span className="flex items-center gap-2">
+                          <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Processing...
+                        </span>
+                      ) : 'Analyze Context'}
                     </button>
                   </div>
                 </div>
@@ -306,7 +343,7 @@ const App: React.FC = () => {
           </div>
 
           {/* Context Card (if result exists) */}
-          {result && (
+          {result && result.context && (
             <div className="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700 animate-fadeIn">
               <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -318,17 +355,17 @@ const App: React.FC = () => {
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div className="bg-slate-900/50 p-3 rounded-lg">
                   <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Environment</p>
-                  <p className="text-sm text-slate-200">{result.context.environment}</p>
+                  <p className="text-sm text-slate-200">{result.context.environment || 'N/A'}</p>
                 </div>
                 <div className="bg-slate-900/50 p-3 rounded-lg">
                   <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Tone</p>
-                  <p className="text-sm text-slate-200">{result.context.tone}</p>
+                  <p className="text-sm text-slate-200">{result.context.tone || 'N/A'}</p>
                 </div>
               </div>
 
               <div className="space-y-3">
                 <div className="flex flex-wrap gap-2">
-                  {result.context.nuances.map((nuance, i) => (
+                  {(result.context.nuances || []).map((nuance, i) => (
                     <span key={i} className="px-2 py-1 bg-indigo-500/20 text-indigo-300 text-xs rounded-full border border-indigo-500/30">
                       {nuance}
                     </span>
@@ -336,7 +373,7 @@ const App: React.FC = () => {
                 </div>
                 
                 <div className="bg-amber-900/20 border-l-2 border-amber-600 p-3 rounded-r">
-                  <p className="text-sm text-amber-200/80 italic">"{result.context.reasoning}"</p>
+                  <p className="text-sm text-amber-200/80 italic">"{result.context.reasoning || 'No reasoning available'}"</p>
                 </div>
                 
                 {result.context.culturalNotes && (
@@ -384,7 +421,14 @@ const App: React.FC = () => {
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
-                    <p>{analyzing ? 'Analyzing media content...' : 'Upload media to see captions and sign translations.'}</p>
+                    <p className="text-center px-6">
+                      {analyzing 
+                        ? 'Analyzing media content... (Large videos may take a minute)' 
+                        : 'Upload media to see captions and sign translations.'}
+                    </p>
+                    {analyzing && !useFastModel && (
+                       <p className="text-xs text-indigo-400 animate-pulse">Using Deep Reasoning (Pro Model)</p>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -464,7 +508,7 @@ const App: React.FC = () => {
             )}
           </div>
 
-          {/* Chat Input (Visible only in chat tab or always docked? Let's put it in the tab flow for simplicity or absolute bottom) */}
+          {/* Chat Input */}
           {activeTab === 'chat' && (
             <div className="p-3 border-t border-slate-700 bg-slate-800">
               <div className="flex gap-2">
