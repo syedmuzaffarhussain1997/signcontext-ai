@@ -1,0 +1,8 @@
+{
+  "name": "SignContext",
+  "description": "An interactive accessibility app using Gemini 3 Pro to analyze video/audio for sign language, speech transcription, and contextual reasoning.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ]
+}
