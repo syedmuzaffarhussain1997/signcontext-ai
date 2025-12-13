@@ -73,7 +73,7 @@ Note: Ensure Node.js v18+ is installed.
 Demo Video: [Watch on Loom](https://www.loom.com/share/647ea832276940abb9315a97f18a25bd) (2-minute walkthrough).
 
 ## License
-This project is licensed under the Creative Commons Attribution 4.0 International License (CC BY 4.0)—see the [LICENSE](LICENSE) file for details. This open licensing aligns with DeepMind's commitment to publicly available models like SignGemma, enabling commercial and non-commercial reuse while attributing the original work.
+This project is licensed under the Creative Commons Attribution 4.0 International License (CC BY 4.0), see the [LICENSE](LICENSE) file for details. This open licensing aligns with DeepMind's commitment to publicly available models like SignGemma, enabling commercial and non-commercial reuse while attributing the original work.
 
 ## Acknowledgments
 - **Google DeepMind**: For Gemini 3 Pro and the Vibe Code Hackathon, inspiring AI innovations for social good.
