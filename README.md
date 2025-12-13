@@ -80,4 +80,4 @@ This project is licensed under the Creative Commons Attribution 4.0 Internationa
 - **Hackathon Organizers**: For providing a platform to prototype impactful solutions.
 - **Community**: Thanks to accessibility advocates and open-source contributors advancing AI for inclusion.
 
-For inquiries, contact [muzaffar.ai.engineer@gmail.com]. Let's build a more accessible future.
+For inquiries, contact muzaffar.ai.engineer@gmail.com Let's build a more accessible future.
