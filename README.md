@@ -61,7 +61,6 @@ Note: Ensure Node.js v18+ is installed.
 
 ## Deployment
 - **Vercel (Recommended)**: Fork this repo, connect to Vercel, and deploy with one click. Add `VITE_API_KEY` as an environment variable in Vercel settings. Live demo: [signcontext-ai.vercel.app](https://signcontext-ai.vercel.app/).
-- **Render Alternative**: Use the provided build/start commands in a Render Web Service, linking your GitHub repo.
 - **AI Studio Origin**: The core was vibe-coded in Google AI Studio; export for custom deploys.
 
 ## Usage
